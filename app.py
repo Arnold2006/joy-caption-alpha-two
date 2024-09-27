@@ -158,7 +158,7 @@ image_adapter.to("cuda")
 
 @spaces.GPU()
 @torch.no_grad()
-def stream_chat(input_image: Image.Image, caption_type: str, caption_length: str | int, extra_options: list[str], name_input: str) -> tuple[str, str]:
+def stream_chat(input_image: Image.Image, caption_type: str, caption_length: str | int, extra_options: list[str], name_input: str, custom_prompt: str) -> tuple[str, str]:
 	torch.cuda.empty_cache()
 
 	# 'any' means no length specified
@@ -188,6 +188,9 @@ def stream_chat(input_image: Image.Image, caption_type: str, caption_length: str
 	
 	# Add name, length, word_count
 	prompt_str = prompt_str.format(name=name_input, length=caption_length, word_count=caption_length)
+
+	if custom_prompt.strip() != "":
+		prompt_str = custom_prompt.strip()
 	
 	# For debugging
 	print(f"Prompt: {prompt_str}")
@@ -317,13 +320,15 @@ with gr.Blocks() as demo:
 			name_input = gr.Textbox(label="Person/Character Name (if applicable)")
 			gr.Markdown("**Note:** Name input is only used if an Extra Option is selected that requires it.")
 
+			custom_prompt = gr.Textbox(label="Custom Prompt (optional, will override all other settings)")
+
 			run_button = gr.Button("Caption")
 		
 		with gr.Column():
 			output_prompt = gr.Textbox(label="Prompt that was used")
 			output_caption = gr.Textbox(label="Caption")
 	
-	run_button.click(fn=stream_chat, inputs=[input_image, caption_type, caption_length, extra_options, name_input], outputs=[output_prompt, output_caption])
+	run_button.click(fn=stream_chat, inputs=[input_image, caption_type, caption_length, extra_options, name_input, custom_prompt], outputs=[output_prompt, output_caption])
 
 
 if __name__ == "__main__":
