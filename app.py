@@ -186,6 +186,9 @@ def stream_chat(input_image: Image.Image, caption_type: str, caption_length: str
 	if len(extra_options) > 0:
 		prompt_str += " " + " ".join(extra_options)
 	
+	# Add name, length, word_count
+	prompt_str = prompt_str.format(name=name_input, length=caption_length, word_count=caption_length)
+	
 	# For debugging
 	print(f"Prompt: {prompt_str}")
 
