@@ -321,6 +321,7 @@ with gr.Blocks() as demo:
 			gr.Markdown("**Note:** Name input is only used if an Extra Option is selected that requires it.")
 
 			custom_prompt = gr.Textbox(label="Custom Prompt (optional, will override all other settings)")
+			gr.Markdown("**Note:** Alpha Two is not a general instruction follower and will not follow prompts outside its training data well. Use this feature with caution.")
 
 			run_button = gr.Button("Caption")
 		
