@@ -320,10 +320,10 @@ with gr.Blocks() as demo:
 			run_button = gr.Button("Caption")
 		
 		with gr.Column():
-			output_prompt = gr.Textbox(label="Prompt")
+			output_prompt = gr.Textbox(label="Prompt that was used")
 			output_caption = gr.Textbox(label="Caption")
 	
-	run_button.click(fn=stream_chat, inputs=[input_image, caption_type, caption_length, extra_options, name_input], outputs=[output_caption, output_prompt])
+	run_button.click(fn=stream_chat, inputs=[input_image, caption_type, caption_length, extra_options, name_input], outputs=[output_prompt, output_caption])
 
 
 if __name__ == "__main__":
