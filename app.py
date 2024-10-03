@@ -11,8 +11,10 @@ import os
 import torchvision.transforms.functional as TVF
 
 
+# Clip path
 CLIP_PATH = "google/siglip-so400m-patch14-384"
 CHECKPOINT_PATH = Path("cgrkzexw-599808")
+
 TITLE = "<h1><center>JoyCaption Alpha Two (2024-10-03)</center></h1>"
 CAPTION_TYPE_MAP = {
 	"Descriptive": [
