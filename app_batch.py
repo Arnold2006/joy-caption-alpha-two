@@ -14,22 +14,141 @@ CLIP_PATH = "google/siglip-so400m-patch14-384"
 CHECKPOINT_PATH = Path("cgrkzexw-599808")
 TITLE = "<h1><center>JoyCaption Alpha Two (2024-09-26a)</center></h1>"
 CAPTION_TYPE_MAP = {
-	"Descriptive": [
-		"Write a descriptive caption for this image in a formal tone.",
-		"Write a descriptive caption for this image in a formal tone within {word_count} words.",
-		"Write a {length} descriptive caption for this image in a formal tone.",
-	],
-	# ... (rest of the options remain unchanged)
+    "Descriptive": [
+        "Write a descriptive caption for this image in a formal tone.",
+        "Write a descriptive caption for this image in a formal tone within {word_count} words.",
+        "Write a {length} descriptive caption for this image in a formal tone.",
+    ],
+    "Descriptive (Informal)": [
+        "Write a descriptive caption for this image in a casual tone.",
+        "Write a descriptive caption for this image in a casual tone within {word_count} words.",
+        "Write a {length} descriptive caption for this image in a casual tone.",
+    ],
+    "Training Prompt": [
+        "Write a stable diffusion prompt for this image.",
+        "Write a stable diffusion prompt for this image within {word_count} words.",
+        "Write a {length} stable diffusion prompt for this image.",
+    ],
+    "MidJourney": [
+        "Write a MidJourney prompt for this image.",
+        "Write a MidJourney prompt for this image within {word_count} words.",
+        "Write a {length} MidJourney prompt for this image.",
+    ],
+    "Booru tag list": [
+        "Write a list of Booru tags for this image.",
+        "Write a list of Booru tags for this image within {word_count} words.",
+        "Write a {length} list of Booru tags for this image.",
+    ],
+    "Booru-like tag list": [
+        "Write a list of Booru-like tags for this image.",
+        "Write a list of Booru-like tags for this image within {word_count} words.",
+        "Write a {length} list of Booru-like tags for this image.",
+    ],
+    "Art Critic": [
+        "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc.",
+        "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it within {word_count} words.",
+        "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it {length}.",
+    ],
+    "Product Listing": [
+        "Write a caption for this image as though it were a product listing.",
+        "Write a caption for this image as though it were a product listing. Keep it under {word_count} words.",
+        "Write a {length} caption for this image as though it were a product listing.",
+    ],
+    "Social Media Post": [
+        "Write a caption for this image as if it were being used for a social media post.",
+        "Write a caption for this image as if it were being used for a social media post. Limit the caption to {word_count} words.",
+        "Write a {length} caption for this image as if it were being used for a social media post.",
+    ],
 }
 
 HF_TOKEN = os.environ.get("HF_TOKEN", None)
 
 class ImageAdapter(nn.Module):
-    # (No changes here, keeping as it is)
-    pass
+    def __init__(self, input_features: int, output_features: int, ln1: bool, pos_emb: bool, num_image_tokens: int, deep_extract: bool):
+        super().__init__()
+        self.deep_extract = deep_extract
 
-# Load CLIP, tokenizer, and LLM (unchanged)
-# ...
+        if self.deep_extract:
+            input_features = input_features * 5
+
+        self.linear1 = nn.Linear(input_features, output_features)
+        self.activation = nn.GELU()
+        self.linear2 = nn.Linear(output_features, output_features)
+        self.ln1 = nn.Identity() if not ln1 else nn.LayerNorm(input_features)
+        self.pos_emb = None if not pos_emb else nn.Parameter(torch.zeros(num_image_tokens, input_features))
+
+        # Other tokens (<|image_start|>, <|image_end|>, <|eot_id|>)
+        self.other_tokens = nn.Embedding(3, output_features)
+        self.other_tokens.weight.data.normal_(mean=0.0, std=0.02)
+
+    def forward(self, vision_outputs: torch.Tensor):
+        if self.deep_extract:
+            x = torch.concat((
+                vision_outputs[-2],
+                vision_outputs[3],
+                vision_outputs[7],
+                vision_outputs[13],
+                vision_outputs[20],
+            ), dim=-1)
+            assert len(x.shape) == 3, f"Expected 3, got {len(x.shape)}"  # batch, tokens, features
+            assert x.shape[-1] == vision_outputs[-2].shape[-1] * 5, f"Expected {vision_outputs[-2].shape[-1] * 5}, got {x.shape[-1]}"
+        else:
+            x = vision_outputs[-2]
+
+        x = self.ln1(x)
+
+        if self.pos_emb is not None:
+            assert x.shape[-2:] == self.pos_emb.shape, f"Expected {self.pos_emb.shape}, got {x.shape[-2:]}"
+            x = x + self.pos_emb
+
+        x = self.linear1(x)
+        x = self.activation(x)
+        x = self.linear2(x)
+
+        # <|image_start|>, IMAGE, <|image_end|>
+        other_tokens = self.other_tokens(torch.tensor([0, 1], device=self.other_tokens.weight.device).expand(x.shape[0], -1))
+        assert other_tokens.shape == (x.shape[0], 2, x.shape[2]), f"Expected {(x.shape[0], 2, x.shape[2])}, got {other_tokens.shape}"
+        x = torch.cat((other_tokens[:, 0:1], x, other_tokens[:, 1:2]), dim=1)
+
+        return x
+
+    def get_eot_embedding(self):
+        return self.other_tokens(torch.tensor([2], device=self.other_tokens.weight.device)).squeeze(0)
+
+# Load CLIP
+print("Loading CLIP")
+clip_processor = AutoProcessor.from_pretrained(CLIP_PATH)
+clip_model = AutoModel.from_pretrained(CLIP_PATH)
+clip_model = clip_model.vision_model
+
+assert (CHECKPOINT_PATH / "clip_model.pt").exists()
+print("Loading VLM's custom vision model")
+checkpoint = torch.load(CHECKPOINT_PATH / "clip_model.pt", map_location='cpu')
+checkpoint = {k.replace("_orig_mod.module.", ""): v for k, v in checkpoint.items()}
+clip_model.load_state_dict(checkpoint)
+del checkpoint
+
+clip_model.eval()
+clip_model.requires_grad_(False)
+clip_model.to("cuda")
+
+# Tokenizer
+print("Loading tokenizer")
+tokenizer = AutoTokenizer.from_pretrained(CHECKPOINT_PATH / "text_model", use_fast=True)
+assert isinstance(tokenizer, PreTrainedTokenizer) or isinstance(tokenizer, PreTrainedTokenizerFast), f"Tokenizer is of type {type(tokenizer)}"
+
+# LLM
+print("Loading LLM")
+print("Loading VLM's custom text model")
+text_model = AutoModelForCausalLM.from_pretrained(CHECKPOINT_PATH / "text_model", device_map=0, torch_dtype=torch.bfloat16)
+text_model.eval()
+
+# Image Adapter
+print("Loading image adapter")
+image_adapter = ImageAdapter(clip_model.config.hidden_size, text_model.config.hidden_size, False, False, 38, False)
+image_adapter.load_state_dict(torch.load(CHECKPOINT_PATH / "image_adapter.pt", map_location="cpu"))
+image_adapter.eval()
+image_adapter.to("cuda")
 
 @spaces.GPU()
 @torch.no_grad()
